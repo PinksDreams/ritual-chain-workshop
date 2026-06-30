@@ -76,10 +76,14 @@ The intended flow is:
 ## Local setup
 
 ```bash
-pnpm install
-ПИШЕМ В КОНСОЛИ:
+## Local setup
 
-npx hardhat compile
+Install dependencies:
+
+pnpm install
+
+Run tests:
+
 npx hardhat test
 ```
 
