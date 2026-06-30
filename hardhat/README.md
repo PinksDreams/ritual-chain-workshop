@@ -1,57 +1,110 @@
-# Sample Hardhat 3 Project (`node:test` and `viem`)
+# Privacy-Preserving AI Bounty Judge
 
-This project showcases a Hardhat 3 project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+This submission improves the original AI bounty judge by replacing public answer submission with a commit-reveal flow.
 
-To learn more about Hardhat 3, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3](https://hardhat.org/hardhat3-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+The original problem was fairness: if answers are public during the submission phase, later participants can copy earlier ideas and submit improved versions. This contract keeps answers hidden until the reveal phase. Only answers that match a prior commitment are eligible for AI judging.
 
-## Project Overview
+## What changed
 
-This example project includes:
+The contract now uses four assignment-required functions:
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+```solidity
+submitCommitment(uint256 bountyId, bytes32 commitment)
+revealAnswer(uint256 bountyId, string calldata answer, bytes32 salt)
+judgeAll(uint256 bountyId, bytes calldata llmInput)
+finalizeWinner(uint256 bountyId, uint256 winnerIndex)
+```
 
-## Usage
+## Lifecycle
 
-### Running Tests
+1. The bounty owner creates a bounty with a commit deadline and a reveal deadline.
+2. During the commit phase, participants submit only a `bytes32 commitment`.
+3. The plaintext answer and salt are not stored on-chain during the commit phase.
+4. After the commit deadline, participants reveal their answer and salt.
+5. The contract recomputes `keccak256(abi.encode(answer, salt, msg.sender, bountyId))`.
+6. If the recomputed hash matches the stored commitment, the reveal is valid.
+7. Only valid revealed answers are included in the batch judging prompt.
+8. The bounty owner calls `judgeAll` once with an LLM input that contains all valid revealed answers.
+9. After judging, the bounty owner finalizes the winner by selecting an index from the valid revealed submissions.
+10. The reward is paid to the selected winner.
 
-To run all the tests in the project, execute the following command:
+## Why `abi.encode` is used
 
-```shell
+The assignment describes the commitment as:
+
+```solidity
+keccak256(answer, salt, msg.sender, bountyId)
+```
+
+In Solidity, the safe implementation is:
+
+```solidity
+keccak256(abi.encode(answer, salt, msg.sender, bountyId))
+```
+
+`abi.encode` avoids ambiguity around dynamic types such as `string`. This makes the commitment calculation clearer and safer than packed encoding.
+
+## Batch judging
+
+The contract includes:
+
+```solidity
+getBatchJudgingPrompt(uint256 bountyId)
+```
+
+This returns a single prompt containing all valid revealed submissions. This supports the assignment requirement to batch judge submissions instead of making one LLM call per answer.
+
+The intended flow is:
+
+1. Call `getBatchJudgingPrompt(bountyId)` after the reveal phase.
+2. Build Ritual LLM precompile input off-chain using that prompt.
+3. Call `judgeAll(bountyId, llmInput)` once.
+4. Store the AI review result on-chain.
+5. Finalize the winner.
+
+## Files
+
+- `contracts/AIJudge.sol` — updated contract with commit-reveal logic.
+- `contracts/utils/PrecompileConsumer.sol` — utility used for Ritual-style precompile calls.
+- `contracts/test/AIJudgeHarness.sol` — test helper used to simulate completed judging locally.
+- `test/AIJudgeCommitReveal.ts` — automated Hardhat tests for the commit-reveal lifecycle.
+- `TEST_PLAN.md` — reveal and lifecycle test plan.
+- `ARCHITECTURE.md` — required architecture note, including Ritual-native hidden submission design.
+- `REFLECTION.md` — required 5-8 sentence reflection answer.
+- `SUBMISSION_SUMMARY.md` — short summary for reviewers.
+
+## Local setup
+
+```bash
+pnpm install
+ПИШЕМ В КОНСОЛИ:
+
+npx hardhat compile
 npx hardhat test
 ```
 
-You can also selectively run the Solidity or `node:test` tests:
+## Test coverage
 
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
+Automated tests cover:
+
+- commitment submission;
+- hidden answer before reveal;
+- duplicate commitment rejection;
+- reveal before deadline rejection;
+- valid reveal acceptance;
+- wrong salt rejection;
+- wrong-wallet reveal rejection;
+- batch judging prompt generation;
+- winner finalization and reward payment.
+
+Expected result:
+
+```text
+8 passing
 ```
 
-### Make a deployment to Sepolia
+## Notes
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+The required commit-reveal track works on any EVM chain. The Ritual-specific part is the `judgeAll` flow, which is designed to use an LLM precompile through `PrecompileConsumer` when deployed to Ritual.
 
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
-
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+The advanced Ritual-native hidden submissions track is provided as an architecture design in `ARCHITECTURE.md`.
