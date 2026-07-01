@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
 import { defineConfig } from "hardhat/config";
 
@@ -20,6 +22,15 @@ export default defineConfig({
           viaIR: true,
         },
       },
+    },
+  },
+
+  networks: {
+    ritual: {
+      type: "http",
+      chainType: "generic",
+      url: process.env.RPC_URL!,
+      accounts: [process.env.PRIVATE_KEY!],
     },
   },
 });
